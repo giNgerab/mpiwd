@@ -1,0 +1,57 @@
+---
+title: "Badanie opóźnień w ruchu pociągów w okresie 16.05.2022 - 30.05.2022"
+output: html_document
+date: "2024-10-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Cele
+Zbadać częstotliwość oraz skalę opóźnień pociągów w danym okresie oraz zależność ich od sytuacji meteorologicznej. Przedstawić tę zależność za pomocą wizualizacji.
+
+## Hipotezy
+Przed badaniem robimy przypuszczenie, iż im gorsza sytuacja pogodowa, tzn. im więcej opadów pewnego dnia oraz im mniejsza temperatura, tym opóźnienia będą większe i częstsze.
+
+## Zbiór danych
+
+1. [Źródło](https://www.kaggle.com/datasets/bartek358/train-delays)
+
+**Opis**: The dataset contains information about delays on polish railroads published by the Polish State Railways in real time. Data was scraped from https://infopasazer.intercity.pl. It covers the period from the midnight of 2022-05-16 until the midnight of 2022-05-30. Observations were collected every 5 minutes.
+
+**Zmienne**:
+
+    datetime - timestamp at which the sample was collected (Warsaw time)
+    id - train ID
+    carrier - the name of the carrier (mainly its PKP Intercity)
+    date - date of the train departure
+    connection - beginning and the destination for the train
+    arrival - planned arrival time at the destination
+    delay - current estimated delay
+    name - train station name
+    
+Dataset został opublikowany w roku 2022 i do teraz ma nie więcej niż 800 pobrań. Nie znalazłem również żadnych raportów z wykorzystaniem tego zbioru, więc można stwierdzić, że zbiór jest dość unikatowy.
+
+2. [Źródło](https://open-meteo.com/en/docs/historical-weather-api#start_date=2022-05-16&end_date=2022-05-30&hourly=temperature_2m,rain,wind_speed_10m&daily=&wind_speed_unit=ms&timezone=Europe%2FBerlin)
+
+**Opis**: Są to archiwowe dane pogodowe dla okresu, odpowiadającego okresu zbierania danych w pierwszym zbiorze. Za lokalizaję wzięto przybliżone koordynaty geograficznego centrum Polski.
+
+## Zarys projektu
+
+W tym projekcie po czyszczeniu zbioru danych oraz konwertowaniu poszczególnych zmiennych do właściwego dla nas typu zajmiemy się badaniem zależności pomiędzy pewnymi typami zmiennych za pomocą np. wyznaczenia korelacji pomiędzy zmiennymi numerycznymi. Znajdziemy też średnie opóźnień dla poszczególnych przewoźników lub relacji, uwzględnimy dane pogodowe, żeby wyłapać tę zależność oraz wesprzymy nasze wnioski odpowiednimi wizualicjami.  
+
+```{r}
+rm(list = ls())
+library(dplyr)
+library(tidyverse)
+library(chron)
+weather = read.csv("open-meteo-51.99N19.98E113m.csv")
+df = read.csv("delays.csv")
+```
+```{r}
+df$date = as.Date(df$date)
+df$Time = times(format(as.POSIXct(df$datetime), format = "%H:%M:%S"))
+```
+
+
