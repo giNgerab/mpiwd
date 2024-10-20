@@ -46,8 +46,9 @@ rm(list = ls())
 library(dplyr)
 library(tidyverse)
 library(chron)
-weather = read.csv("open-meteo-51.99N19.98E113m.csv")
+weather = read.csv("open-meteo-52.55N13.41E38m.csv")
 df = read.csv("delays.csv")
+summarise(df)
 ```
 ```{r}
 df$date = as.Date(df$date)
