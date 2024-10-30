@@ -1,7 +1,7 @@
 ---
 title: "Badanie opóźnień w ruchu pociągów w okresie 16.05.2022 - 30.05.2022"
+author: "Andrii Yanishesvkyi"
 output: html_document
-date: "2024-10-09"
 ---
 
 ```{r setup, include=FALSE}
