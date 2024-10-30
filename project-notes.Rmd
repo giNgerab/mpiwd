@@ -35,24 +35,26 @@ Przed badaniem robimy przypuszczenie, iż im gorsza sytuacja pogodowa, tzn. im w
     
 Dataset został opublikowany w roku 2022 i do teraz ma nie więcej niż 800 pobrań. Nie znalazłem również żadnych raportów z wykorzystaniem tego zbioru, więc można stwierdzić, że zbiór jest dość unikatowy.
 
+Z drugiej strony, zbiór liczy około 4 mln obserwacji, więc jest dla nas dość reprezentatywny.
+
 2. [Pogoda](https://open-meteo.com/en/docs/historical-weather-api#start_date=2022-05-16&end_date=2022-05-30&hourly=temperature_2m,rain,wind_speed_10m&daily=&wind_speed_unit=ms&timezone=Europe%2FBerlin)
 
 **Opis**: Są to archiwowe dane pogodowe dla okresu, odpowiadającego okresu zbierania danych w pierwszym zbiorze. Za lokalizaję wzięto przybliżone koordynaty geograficznego centrum Polski.
 
 ## Zarys projektu
 
-W tym projekcie po czyszczeniu zbioru danych oraz konwertowaniu poszczególnych zmiennych do właściwego dla nas typu zajmiemy się badaniem zależności pomiędzy pewnymi typami zmiennych za pomocą np. wyznaczenia korelacji pomiędzy zmiennymi numerycznymi. Znajdziemy też średnie opóźnień dla poszczególnych przewoźników lub relacji, uwzględnimy dane pogodowe, żeby wyłapać tę zależność oraz wesprzymy nasze wnioski odpowiednimi wizualicjami.  
+W tym projekcie po czyszczeniu zbioru danych oraz konwertowaniu poszczególnych zmiennych do właściwego dla nas typu zajmiemy się badaniem zależności pomiędzy pewnymi typami zmiennych za pomocą np. wyznaczenia korelacji pomiędzy zmiennymi numerycznymi. Znajdziemy też średnie opóźnień dla poszczególnych przewoźników lub relacji, uwzględnimy dane pogodowe, żeby wyłapać tę zależność oraz wesprzymy nasze wnioski odpowiednimi wizualicjami. Pomysłem też jest zrobienie liniowego modelu predykcyjnego, który na podstawie danych pogodowych będzie przewidywał średnie opóźnienie na poszczególnych stacji.
 
 # Realizacja
 
-## Przygotowanie zbiorow danych
+## Przygotowanie zbiorów danych
 
-Zacznijmy od importowania zbiorow oraz wszystkich potrzebnych bibliotek
+Zacznijmy od importowania zbiorów oraz wszystkich potrzebnych bibliotek
 
 ```{r}
 #rm(list = ls())
-#dftemp = read.csv("delays.csv")
-#lockBinding("dftemp", globalenv())
+dftemp = read.csv("delays.csv")
+lockBinding("dftemp", globalenv())
 ```
 
 ```{r}
@@ -60,17 +62,21 @@ library(dplyr)
 library(tidyverse)
 library(chron)
 library(ggplot2)
+library(fuzzyjoin)
+library(corrplot)
+
 weather = read.csv("open-meteo-52.55N13.41E38m.csv")
 
 df = dftemp
 ```
 
-Zajmijmy sie najpierw zbiorem opoznien
+Zajmijmy się najpierw zbiorem opóźnień
 
 ```{r}
 summary(df)
 sum(is.na(df))
 ```
+Konwertujemy typy danych
 
 ```{r}
 df$datetime = strptime(df$datetime, format = "%Y-%m-%d %H:%M")
@@ -93,91 +99,107 @@ df$start = as.factor(df$start)
 df$end = as.factor(df$end)
 ```
 
-Teraz zbiorem danych pogodowych
+Teraz czyscimy zbior danych pogodowych
+
+```{r}
+head(weather)
+```
+Widzimy, że jest niedobrze, pierwsze 2 usunąć
 ```{r}
 colnames(weather) = c(weather[2, 1], weather[2, 2], weather[2, 3], weather[2, 4], weather[2, 5],weather[2, 6])
 weather = weather[c(-1, -2), ]
 
 sum(is.na(weather))
 weather$time = strptime(weather$time, format = '%Y-%m-%d T %H:%M')
+weather$`temperature_2m (°C)` = as.numeric(weather$`temperature_2m (°C)`)
+weather$`relative_humidity_2m (%)` = as.numeric(weather$`relative_humidity_2m (%)`)
+weather$`rain (mm)` = as.numeric(weather$`rain (mm)`)
+weather$`surface_pressure (hPa)` = as.numeric(weather$`surface_pressure (hPa)`)
+weather$`wind_speed_10m (m/s)` = as.numeric(weather$`wind_speed_10m (m/s)`)
 ```
+NaNów nie ma, dobrze
 
+Lączymy zbiory
 
 ```{r}
-length(unique(df$name))
+df = fuzzyjoin::difference_left_join(
+  df, weather, 
+  by = c("datetime" = "time"),     # Adjusting column names here
+  max_dist = as.difftime(30, units = "mins")  # Adjust max_dist as needed
+) %>%
+  group_by(datetime) %>%
+  filter(abs(difftime(datetime, time, units = "secs")) == min(abs(difftime(datetime, time, units = "secs")))) %>%
+  ungroup() %>%
+  select(-time)     # Remove the redundant time column from weather
+
+rm(weather)
+```
+
+Robimy delay factor
+
+```{r}
 df$delay_factor = cut(df$delay,
                        breaks = c(-Inf, 0, 5, 30, 60, Inf),
                        labels = c("0 min", "1-5 min", "6-30 min", "31-60 min", "> 60 min"),
                        right = TRUE)
 
-delay_over_60_by_carrier <- df[df$delay_factor == "> 60 min",] %>%
+delay_over_60_by_carrier = df[df$delay_factor == "> 60 min",] %>%
   group_by(carrier)%>%
   summarise("Delays_Over_60_mins" = length(delay_factor))
-
 ```
 
-```{r}
-total_delays <- sum(delay_over_60_by_carrier$Delays_Over_60_mins)
 
-ggplot(delay_over_60_by_carrier, aes(x = carrier, y = log(Delays_Over_60_mins), fill = carrier)) +
-  geom_bar(stat = "identity", color = "black", width = 0.7) +
+```{r}
+library(ggridges)
+
+library(plotly)
+
+
+delay_summary = df %>%
+  group_by(carrier, delay_factor) %>%
+  summarise(count = log(n()), .groups = 'drop')
+
+total_counts = delay_summary %>%
+  group_by(carrier) %>%
+  summarise(total_count = sum(count), .groups = 'drop')
+
+delay_summary = delay_summary %>%
+  left_join(total_counts, by = "carrier") %>%
+  mutate(count = 100*count / total_count) 
+
+bar_plot = ggplot(delay_summary, aes(x = carrier, y = count, fill = delay_factor)) +
+  geom_bar(stat = "identity", position = "dodge") +
   labs(
-    title = "Delays Over 60 Minutes by Carrier",
-    x = "Carrier",
-    y = "log(Delays Over 60 Minutes)"
+    title = "Counts of Train Delays by Carrier",
+    #x = "Carrier",
+    y = "Log(Percentage of delay type)",
+    fill = "Delay Factor"
   ) +
-  theme_minimal(base_size = 14) +
+  theme_minimal(base_size = 15) +
   theme(
-    plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
-    axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),
-    axis.text.y = element_text(size = 12),
-    axis.title.x = element_text(margin = margin(t = 10)),
-    axis.title.y = element_text(margin = margin(r = 10)),
-    legend.position = "none"
-  ) +
-  scale_fill_brewer(palette = "Set3") +
-  scale_y_continuous(limits = c(0, max(log(delay_over_60_by_carrier$Delays_Over_60_mins)) + 5), expand = c(0, 0.5)) +  # Adjust y-axis limits
-  geom_text(
-    aes(
-      label = paste0(
-        round(log(Delays_Over_60_mins), 2), 
-        "\n(", round((Delays_Over_60_mins / total_delays) * 100, 2), "%)"
-      )
-    ),
-    vjust = -0.3,  # Adjust as necessary
-    size = 4,     # Adjust for readability
-    color = "black",
-    position = position_dodge(width = 0.7)
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    axis.text.x = element_text(face = "bold"),
+    legend.position = "right"
   )
+
+interactive_plot = ggplotly(bar_plot)
+
+interactive_plot = interactive_plot %>%
+  layout(
+    xaxis = list(tickangle = 45)
+  )
+
+interactive_plot
 ```
 
 ```{r}
-ggplot(df, aes(y = delay)) +
-  geom_boxplot(
-    fill = "lightblue",     # Fill color for the box
-    color = "darkblue",     # Color for the outline of the box
-    outlier.colour = "red", # Color for outliers
-    outlier.shape = 16,     # Shape for outliers
-    outlier.size = 2,       # Size of the outlier points
-    notch = TRUE             # Notched box for better visualization
-  ) +
-  labs(
-    title = "Boxplot of Delays",
-    y = "Delay (minutes)",
-    x = ""
-  ) +
-  theme_minimal(base_size = 14) +
-  theme(
-    plot.title = element_text(hjust = 0.5, face = "bold", size = 16), # Center title and bold
-    axis.title.y = element_text(size = 14),                          # Y-axis title size
-    axis.text.y = element_text(size = 12)                            # Y-axis text size
-  )
+df_by_hour = df%>%
+  group_by(format(datetime, "%Y-%m-%d %H"))%>%
+  summarize(mean(delay), mean(`rain (mm)`), mean(`temperature_2m (°C)`), mean(`relative_humidity_2m (%)`), mean(`wind_speed_10m (m/s)`))
+
+df_by_hour = df_by_hour[,-1]
+
+correlation = cor(df_by_hour)
+corrplot(correlation)
 ```
-
-```{r}
-
-```
-
-
-
 
