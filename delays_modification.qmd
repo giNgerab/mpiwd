@@ -1,0 +1,131 @@
+---
+title: "Dodatek do projektu: Modyfikacja zbiorów"
+output: html_document
+author: "Andrii Yanishevskyi"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(fuzzyjoin)
+library(chron)
+```
+
+# Zbiór opóźnień
+
+```{r}
+df = read_csv("delays.csv")
+```
+
+```{r}
+summary(df)
+sum(is.na(df))
+```
+
+Widzimy, że zmienne są w formacie `char` oraz nie ma braków danych, więc możemy śmiało konwertować zmienne w potrzebne dla nas typy
+
+```{r}
+df$datetime = strptime(df$datetime, format = "%Y-%m-%d %H:%M")
+df$date = strptime(df$date, format = '%Y-%m-%d')
+df$arrival = strptime(df$arrival, format = '%H:%M')
+```
+
+Zmienna `connection` zawiera zarówno stację początkową, jak i końcową, natomiast dla nas będzie wygodniej analizować te połączenia z oddzielnymi kolumnami na początek i koniec relacji 
+
+```{r}
+split_data = do.call(rbind, strsplit(df$connection, " - ")) #tworzymy tymczasową zmienną
+df$start = split_data[,1]
+df$end = split_data[,2]
+rm(split_data)
+df = df[, -5]
+```
+
+Konwertujemy pozostałe kolumny
+
+```{r}
+df$id = as.factor(df$id)
+df$carrier = as.factor(df$carrier)
+df$delay = as.numeric(gsub(" min", "", df$delay))
+df$name = as.factor(df$name)
+df$start = as.factor(df$start)
+df$end = as.factor(df$end)
+```
+
+Ponieważ zbiór ten liczy prawie 4 miliony obserwacji, wybierzmy próbę reprezentatywną w rozmiarze około 10% od całości każdego dnia. Wybór zmiennej `date` jako punktu odniesienia doboru próby jest spowodowany głównie tym, że w przyszłości w skali właśnie tej zmiennej będziemy mierzyli skalę opóźnień w zależności od pogody 
+
+```{r}
+df = df %>%
+  group_by(date) %>%
+  arrange(delay)%>% #dodatkowo też sortujemy względem opóźnienia
+  slice(seq(1, n(), by = 10)) %>% #i wybieramy każdą dziesiątą obserwację
+  ungroup()
+```
+
+
+# Zbiór pogodowy
+
+```{r}
+weather = read.csv("weather.csv")
+head(weather)
+```
+Widzimy, że pierwszy wiersz reprezentuje metadatę tego zbióru, wówczas drugi to tak naprawdę są nazwy istotnych dla nas zmiennych
+```{r}
+colnames(weather) = c("time", "temperature", "humidity", "rain", "pressure", "wind_speed")
+weather = weather[c(-1, -2), ]
+
+sum(is.na(weather))
+
+weather$time = strptime(weather$time, format = '%Y-%m-%d T %H:%M')
+weather$temperature = as.numeric(weather$temperature)
+weather$humidity = as.numeric(weather$humidity)
+weather$rain = as.numeric(weather$rain)
+weather$pressure = as.numeric(weather$pressure)
+weather$wind = as.numeric(weather$wind)
+```
+Zbiór nie ma braków danych
+
+# Lączenie zbiorów
+
+Do tego celu użyjmy funkcji `difference_left_join` z biblioteki `fuzzyjoin`
+
+Ponieważ zbiór [2](#pogoda) ma dane rejestrowane co godzinę, podczas gdy zbiór [1](#opozn) ma zapisy z różnicą w 5 minut, musimy łączyć te zbiory z relacją 1:n, tzn. jedna obserwacja zbioru [2](#pogoda) dopisze się do wielu wierszy zbioru [1](#opozn)
+
+Idea polega na dopisywaniu wiersza zbioru [2](#pogoda) do wiersza zbioru [1](#opozn) wtw gdy różnica zmiennych `datetime` jest mniejsza od 30 min, ogólnie mówiąc, bierzemy dane z najbliższego okresu.
+
+```{r}
+df = fuzzyjoin::difference_left_join(
+  df, weather, 
+  by = c("datetime" = "time"),
+  max_dist = as.difftime(30, units = "mins") #definiujemy maksymalnie dopuszczalną różnicę w czasie
+)%>% 
+  # group_by(datetime) %>%
+  # filter(abs(difftime(datetime, datetime, units = "secs")) == min(abs(difftime(datetime, datetime, units = "secs")))) %>%
+  # ungroup() %>%
+  select(-time)     #usuwamy powtarzającą się kolumnę
+
+rm(weather)
+```
+
+Do niektórych wizualizacji przyda nam się zfaktoryzowana kolumna `delay`
+
+```{r}
+df$delay_factor = cut(df$delay,
+                       breaks = c(-Inf, 0, 5, 30, 60, Inf),
+                       labels = c("0 min", "1-5 min", "6-30 min", "31-60 min", "> 60 min"),
+                       right = TRUE)
+```
+
+Podczas pracy z modelem regresji logistycznej będziemy się opierać o zmienną `is_late`. Przyjmijmy, że pociąg się spóźnił jeżeli opóźnienie wynosi 5 minut lub więcej
+
+```{r}
+df$is_late = ifelse(df$delay >= 5, TRUE, FALSE)
+```
+
+Zapisujemy gotowy zbiór do pliku `data.csv`, żebyśmy mogli z niego skorzystać w głównym projecie 
+
+```{r}
+write.csv(df, file = "data.csv")
+```
