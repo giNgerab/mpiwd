@@ -1,7 +1,13 @@
 ---
 title: "Badanie opóźnień w ruchu pociągów w okresie 16.05.2022 - 30.05.2022"
 author: "Andrii Yanishesvkyi"
-output: html_document
+highlight-style: github
+output: 
+  html_document:
+    embed-resources: true
+    toc: true
+    code-line-numbers: true
+    code-fold: true
 ---
 
 ```{r setup, include=FALSE}
@@ -11,14 +17,16 @@ knitr::opts_chunk$set(echo = TRUE)
 # Wstęp
 
 ## Cele
+
 Zbadać częstotliwość oraz skalę opóźnień pociągów w danym okresie oraz zależność ich od sytuacji meteorologicznej. Przedstawić tę zależność za pomocą wizualizacji.
 
 ## Hipotezy
+
 Przed badaniem robimy przypuszczenie, iż gorsza sytuacja pogodowa powoduje większe i częstsze opóźnienia
 
 ## Zbiór danych
 
-1. [Opóźnienia pociągów](https://www.kaggle.com/datasets/bartek358/train-delays) <a name="opozn"></a>
+1.  [Opóźnienia pociągów](https://www.kaggle.com/datasets/bartek358/train-delays) <a name="opozn"></a>
 
 [Plik](/delays.csv)
 
@@ -26,20 +34,22 @@ Przed badaniem robimy przypuszczenie, iż gorsza sytuacja pogodowa powoduje wię
 
 **Zmienne**:
 
-    datetime - timestamp at which the sample was collected (Warsaw time)
-    id - train ID
-    carrier - the name of the carrier (mainly its PKP Intercity)
-    date - date of the train departure
-    connection - beginning and the destination for the train
-    arrival - planned arrival time at the destination
-    delay - current estimated delay
-    name - train station name
-    
+```         
+datetime - timestamp at which the sample was collected (Warsaw time)
+id - train ID
+carrier - the name of the carrier (mainly its PKP Intercity)
+date - date of the train departure
+connection - beginning and the destination for the train
+arrival - planned arrival time at the destination
+delay - current estimated delay
+name - train station name
+```
+
 Dataset został opublikowany w roku 2022 i do teraz ma nie więcej niż 800 pobrań. Nie znalazłem również żadnych raportów z wykorzystaniem tego zbioru, więc można stwierdzić, że zbiór jest dość unikatowy.
 
 Z drugiej strony, zbiór liczy około 4 mln obserwacji, więc jest dla nas dość reprezentatywny.
 
-2. [Pogoda](https://open-meteo.com/en/docs/historical-weather-api#start_date=2022-05-16&end_date=2022-05-30&hourly=temperature_2m,rain,wind_speed_10m&daily=&wind_speed_unit=ms&timezone=Europe%2FBerlin) <a name="pogoda"></a>
+2.  [Pogoda](https://open-meteo.com/en/docs/historical-weather-api#start_date=2022-05-16&end_date=2022-05-30&hourly=temperature_2m,rain,wind_speed_10m&daily=&wind_speed_unit=ms&timezone=Europe%2FBerlin) <a name="pogoda"></a>
 
 [Plik](/weather.csv)
 
@@ -49,13 +59,11 @@ Z drugiej strony, zbiór liczy około 4 mln obserwacji, więc jest dla nas doś�
 
 W tym projekcie po czyszczeniu zbioru danych oraz konwertowaniu poszczególnych zmiennych do właściwego dla nas typu zajmiemy się badaniem zależności pomiędzy pewnymi typami zmiennych za pomocą np. wyznaczenia korelacji pomiędzy zmiennymi numerycznymi. Znajdziemy też średnie opóźnień dla poszczególnych przewoźników lub relacji, uwzględnimy dane pogodowe, żeby wyłapać tę zależność oraz wesprzymy nasze wnioski odpowiednimi wizualicjami. Pomysłem też jest zrobienie liniowego modelu predykcyjnego, który na podstawie danych pogodowych będzie przewidywał średnie opóźnienie na poszczególnych stacji.
 
-REGRESJA LOGISTYCZNA
-
 # Realizacja
 
 ## Przygotowanie zbiorów danych
 
-Z powodu tego, że zbiór [1](#opozn) liczy prawie 4 mln obserwacji, czyszczenie, modyfikowanie obu zbiorów, wybranie prób reprezentatywnych oraz łączenie w jedyny zbiór zostało umieszczone w oddzielnym pliku `delays_modification.Rmd` oraz zrenderowane do [tego pliku](/delays_modification.html), w celu oszczędzania zasobów komputera podczas przeprowadzania analizy.
+Z powodu tego, że zbiór [1](#opozn) liczy prawie 4 mln obserwacji, czyszczenie, modyfikowanie obu zbiorów, wybranie prób reprezentatywnych oraz łączenie w jedyny zbiór zostało umieszczone w oddzielnym pliku `delays_modification.qmd` oraz zrenderowane do [tego pliku](/delays_modification.html), w celu oszczędzania zasobów komputera podczas przeprowadzania analizy.
 
 ```{r}
 rm(list = ls())
@@ -70,7 +78,6 @@ df = read.csv("data.csv")
 ```
 
 ## Wizualizacje ogólne
-
 
 ```{r}
 library(ggridges)
@@ -114,16 +121,7 @@ interactive_plot = interactive_plot %>%
 
 interactive_plot
 ```
-
-
 ```{r}
-sample <- sample(c(TRUE, FALSE), nrow(df), replace=TRUE, prob=c(0.7,0.3))
-train <- df[sample, ]
-test <- df[!sample, ]
 
-model = glm(is_late ~ temperature + rain + humidity, data = train, family = binomial)
-summary(model)
-# Predict probabilities
-predicted = predict(model, test, type="response")
 ```
 

@@ -1,7 +1,10 @@
 ---
 title: "Dodatek do projektu: Modyfikacja zbiorów"
-output: html_document
 author: "Andrii Yanishevskyi"
+format: 
+  html:
+    embed-resources: true
+    toc: true
 ---
 
 ```{r setup, include=FALSE}
@@ -17,11 +20,10 @@ library(chron)
 # Zbiór opóźnień
 
 ```{r}
-df = read_csv("delays.csv")
+df = read.csv('delays.csv')
 ```
 
 ```{r}
-summary(df)
 sum(is.na(df))
 ```
 
@@ -54,13 +56,13 @@ df$start = as.factor(df$start)
 df$end = as.factor(df$end)
 ```
 
-Ponieważ zbiór ten liczy prawie 4 miliony obserwacji, wybierzmy próbę reprezentatywną w rozmiarze około 10% od całości każdego dnia. Wybór zmiennej `date` jako punktu odniesienia doboru próby jest spowodowany głównie tym, że w przyszłości w skali właśnie tej zmiennej będziemy mierzyli skalę opóźnień w zależności od pogody 
+Ponieważ zbiór ten liczy prawie 4 miliony obserwacji, wybierzmy próbę reprezentatywną w rozmiarze około $20\%$ od całości każdego dnia. Wybór zmiennej `date` jako punktu odniesienia doboru próby jest spowodowany głównie tym, że w przyszłości w skali właśnie tej zmiennej będziemy mierzyli skalę opóźnień w zależności od pogody 
 
 ```{r}
 df = df %>%
   group_by(date) %>%
   arrange(delay)%>% #dodatkowo też sortujemy względem opóźnienia
-  slice(seq(1, n(), by = 10)) %>% #i wybieramy każdą dziesiątą obserwację
+  slice(seq(1, n(), by = 20)) %>% #i wybieramy każdą dwudziestą obserwację
   ungroup()
 ```
 
@@ -91,9 +93,9 @@ Zbiór nie ma braków danych
 
 Do tego celu użyjmy funkcji `difference_left_join` z biblioteki `fuzzyjoin`
 
-Ponieważ zbiór [2](#pogoda) ma dane rejestrowane co godzinę, podczas gdy zbiór [1](#opozn) ma zapisy z różnicą w 5 minut, musimy łączyć te zbiory z relacją 1:n, tzn. jedna obserwacja zbioru [2](#pogoda) dopisze się do wielu wierszy zbioru [1](#opozn)
+Ponieważ zbiór [2](#pogoda) ma dane rejestrowane co godzinę, podczas gdy zbiór [1](#opozn) ma zapisy z różnicą w 5 minut, musimy łączyć te zbiory z relacją $1\colon n$, tzn. jedna obserwacja zbioru [2](#pogoda) dopisze się do wielu wierszy zbioru [1](#opozn)
 
-Idea polega na dopisywaniu wiersza zbioru [2](#pogoda) do wiersza zbioru [1](#opozn) wtw gdy różnica zmiennych `datetime` jest mniejsza od 30 min, ogólnie mówiąc, bierzemy dane z najbliższego okresu.
+Idea polega na dopisywaniu wiersza zbioru [2](#pogoda) do wiersza zbioru [1](#opozn) wtw gdy różnica zmiennych `datetime` jest mniejsza od $30$ min, ogólnie mówiąc, bierzemy dane z najbliższego okresu.
 
 ```{r}
 df = fuzzyjoin::difference_left_join(
@@ -118,7 +120,7 @@ df$delay_factor = cut(df$delay,
                        right = TRUE)
 ```
 
-Podczas pracy z modelem regresji logistycznej będziemy się opierać o zmienną `is_late`. Przyjmijmy, że pociąg się spóźnił jeżeli opóźnienie wynosi 5 minut lub więcej
+Podczas pracy z modelem regresji logistycznej będziemy się opierać o zmienną `is_late`. Przyjmijmy, że pociąg się spóźnił jeżeli opóźnienie wynosiło $5$ minut lub więcej
 
 ```{r}
 df$is_late = ifelse(df$delay >= 5, TRUE, FALSE)
