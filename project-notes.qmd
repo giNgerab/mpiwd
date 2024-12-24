@@ -2,16 +2,15 @@
 title: "Badanie opóźnień w ruchu pociągów w okresie 16.05.2022 - 30.05.2022"
 author: "Andrii Yanishesvkyi"
 highlight-style: github
-output: 
-  html_document:
+format: 
+  html:
     embed-resources: true
     toc: true
-    code-line-numbers: true
     code-fold: true
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message=FALSE, error = FALSE)
 ```
 
 # Wstęp
@@ -32,22 +31,35 @@ Przed badaniem robimy przypuszczenie, iż gorsza sytuacja pogodowa powoduje wię
 
 **Opis**: The dataset contains information about delays on polish railroads published by the Polish State Railways in real time. Data was scraped from https://infopasazer.intercity.pl. It covers the period from the midnight of 2022-05-16 until the midnight of 2022-05-30. Observations were collected every 5 minutes.
 
-**Zmienne**:
+**Zmienne** wyglądają w taki sposób po drobnych zmianach:
 
-```         
-datetime - timestamp at which the sample was collected (Warsaw time)
-id - train ID
-carrier - the name of the carrier (mainly its PKP Intercity)
-date - date of the train departure
-connection - beginning and the destination for the train
-arrival - planned arrival time at the destination
-delay - current estimated delay
-name - train station name
-```
+     
+`datetime` - czas w którym dane zostały zeskrapowane
+`id` - numer pociągu
+`carrier` - przewoźnik
+`start` - stacja początkowa
+`end` - stacja końcowa
+`delay` - current estimated delay
+`name` - train station name
+`delay_factor` - zfaktoryzowane `delay`
+`is_late` - czy pociąg się spóźnił (TRUE gdy `delay`>=5, FALSE gdy `delay`<5)
+
 
 Dataset został opublikowany w roku 2022 i do teraz ma nie więcej niż 800 pobrań. Nie znalazłem również żadnych raportów z wykorzystaniem tego zbioru, więc można stwierdzić, że zbiór jest dość unikatowy.
 
-Z drugiej strony, zbiór liczy około 4 mln obserwacji, więc jest dla nas dość reprezentatywny.
+Z drugiej strony, zbiór liczy około 4 mln obserwacji, więc jest dla nas dość reprezentatywne.
+
+```{r}
+rm(list = ls())
+library(tidyverse)
+library(chron)
+library(corrplot)
+library(fuzzyjoin)
+library(DT)
+df = read.csv("data.csv")
+# datatable(df)
+```
+
 
 2.  [Pogoda](https://open-meteo.com/en/docs/historical-weather-api#start_date=2022-05-16&end_date=2022-05-30&hourly=temperature_2m,rain,wind_speed_10m&daily=&wind_speed_unit=ms&timezone=Europe%2FBerlin) <a name="pogoda"></a>
 
@@ -63,21 +75,428 @@ W tym projekcie po czyszczeniu zbioru danych oraz konwertowaniu poszczególnych 
 
 ## Przygotowanie zbiorów danych
 
-Z powodu tego, że zbiór [1](#opozn) liczy prawie 4 mln obserwacji, czyszczenie, modyfikowanie obu zbiorów, wybranie prób reprezentatywnych oraz łączenie w jedyny zbiór zostało umieszczone w oddzielnym pliku `delays_modification.qmd` oraz zrenderowane do [tego pliku](/delays_modification.html), w celu oszczędzania zasobów komputera podczas przeprowadzania analizy.
+Z powodu tego, że zbiór [1](#opozn) liczy prawie 4 mln obserwacji, wybranie prób reprezentatywnych oraz łączenie w jedyny zbiór znalazły się w [oddzielnym pliku](./delay_modification.qmd), [zrenderowana wersja](./delay_modification.html)
+
 
 ```{r}
-rm(list = ls())
+df = df[, !colnames(df)=="X"]
+df[sapply(df, is.character)] = lapply(df[sapply(df, is.character)], as.factor)
 ```
+```{r}
+df$delay_factor = cut(df$delay,
+                      breaks = c(-Inf, 0, 5, 30, 60, Inf),
+                      labels = c("0 min", "1-5 min", "6-30 min", "31-60 min", "> 60 min"),
+                      right = TRUE)
+
+df$is_late = ifelse(df$delay > 1, TRUE, FALSE)
+```
+
+
+## Badanie korelacji zmiennych numerycznych
+
+Zbadajmy korelację pomiędzy zmienną `delay` a zmiennymi odpowiadającymi warunkom pogodowym
+```{r}
+library(ggcorrplot)
+corr = cor(select_if(df, is.numeric)[,-1])
+ggcorrplot(corr,
+           method = "circle",
+           type = "upper",
+           ggtheme = theme_classic,
+           legend.title = "",
+           colors = c("darkblue", "white", "darkred"),
+           outline.color = "darkgrey")
+
+```
+Na zaskoczenie korelacja okazała się bardzo bliska do zera, z czego robimy wniosek, że w ten sposób nie ujawnimy zależności o ile one istnieją. Nie znaczy to jednak że ich nie ma.
+
+## Test Chi-Square (V RAZRABOTKIE)
+
+Założenia...
+
 
 ```{r}
-library(tidyverse)
-library(chron)
-library(corrplot)
-
-df = read.csv("data.csv")
+library(ltm)
+df$is_rain = ifelse(df$rain!=0, TRUE, FALSE)
 ```
 
-## Wizualizacje ogólne
+### Model regresji logistycznej (V RAZRABOTKIE)
+
+Model ten jest przydatny do przeprowadzenia przewidywania zmiennej typu logicznego na podstawie wartości predyktorów
+
+```{r}
+library(caret)
+
+df$is_rain = ifelse(df$rain>0, TRUE, FALSE)
+
+sample = sample(c(TRUE, FALSE), nrow(df), replace=TRUE, prob=c(0.7,0.3))
+train = df[sample, ]
+test = df[!sample, ]
+rm(sample)
+
+model = glm(is_late~is_rain, family="binomial", data=train)
+
+summary(model)
+
+predicted = predict(model, test[, colnames(test)!="is_late"], type="response")
+
+predicted = scale(predicted)
+
+predicted_bool = ifelse(predicted>mean(predicted), TRUE, FALSE)
+
+confusionMatrix(factor(test$is_late, levels = c(TRUE, FALSE)), factor(predicted_bool, levels = c(TRUE, FALSE)))
+
+pscl::pR2(model)["McFadden"]
+```
+# Wizualizacje
+
+## Mapa Polski
+
+Pokażmy sobie jak opóźnienia zależały od tego, skąd przybył pociąg. Do tego celu wziąłem sobie wszystkie unikalne wartości z kolumny `start` i za pomocą narzędzia [ChatGPT](https://chatgpt.com) dostałem listę województw w których znajdują się te stacje
+
+```{r}
+stations <- list(
+  c("Siedlce", "Mazowieckie"),
+  c("Wejherowo", "Pomorskie"),
+  c("Warszawa Wschodnia", "Mazowieckie"),
+  c("Gdańsk Śródmieście", "Pomorskie"),
+  c("Kraków Główny", "Małopolskie"),
+  c("Świnoujście", "Zachodniopomorskie"),
+  c("Kołobrzeg", "Zachodniopomorskie"),
+  c("Gdańsk Zaspa", "Pomorskie"),
+  c("Przemyśl Główny", "Podkarpackie"),
+  c("Gdynia Główna", "Pomorskie"),
+  c("Jelenia Góra", "Dolnośląskie"),
+  c("Bohumin", "Śląskie"),
+  c("Łódź Fabryczna", "Łódzkie"),
+  c("Radom Główny", "Mazowieckie"),
+  c("Gdynia Cisowa", "Pomorskie"),
+  c("Warszawa Zachodnia", "Mazowieckie"),
+  c("Gdańsk Główny", "Pomorskie"),
+  c("Mława", "Mazowieckie"),
+  c("Dęblin", "Lubelskie"),
+  c("Warszawa Centralna", "Mazowieckie"),
+  c("Łuków", "Lubelskie"),
+  c("Szczecin Główny", "Zachodniopomorskie"),
+  c("Wrocław Główny", "Dolnośląskie"),
+  c("Żywiec", "Śląskie"),
+  c("Działdowo", "Warmińsko-Mazurskie"),
+  c("Skierniewice", "Łódzkie"),
+  c("Kłodzko Główne", "Dolnośląskie"),
+  c("Bydgoszcz Główna", "Kujawsko-Pomorskie"),
+  c("Wodzisław Śląski", "Śląskie"),
+  c("Konin", "Wielkopolskie"),
+  c("Częstochowa", "Śląskie"),
+  c("Ścinawa", "Dolnośląskie"),
+  c("Choszczno", "Zachodniopomorskie"),
+  c("Koło", "Wielkopolskie"),
+  c("Smętowo", "Pomorskie"),
+  c("Sędziszów", "Świętokrzyskie"),
+  c("Pruszków", "Mazowieckie"),
+  c("Gliwice", "Śląskie"),
+  c("Otwock", "Mazowieckie"),
+  c("Kłodzko Miasto", "Dolnośląskie"),
+  c("Gdynia Chylonia", "Pomorskie"),
+  c("Włocławek", "Kujawsko-Pomorskie"),
+  c("Skarżysko-Kamienna", "Świętokrzyskie"),
+  c("Teresin Niepokalanów", "Mazowieckie"),
+  c("Tłuszcz", "Mazowieckie"),
+  c("Przeworsk", "Podkarpackie"),
+  c("Lębork", "Pomorskie"),
+  c("Kluczbork", "Opolskie"),
+  c("Katowice", "Śląskie"),
+  c("Wyrzysk Osiek", "Wielkopolskie"),
+  c("Racibórz", "Śląskie"),
+  c("Opole Główne", "Opolskie"),
+  c("Rzeszów Główny", "Podkarpackie"),
+  c("Zwardoń", "Śląskie"),
+  c("Krzyż", "Wielkopolskie"),
+  c("Stalowa Wola Południe", "Podkarpackie"),
+  c("Tychy Lodowisko", "Śląskie"),
+  c("Elbląg", "Warmińsko-Mazurskie"),
+  c("Legnica", "Dolnośląskie"),
+  c("Inowrocław", "Kujawsko-Pomorskie"),
+  c("Żyrardów", "Mazowieckie"),
+  c("Sulejówek Miłosna", "Mazowieckie"),
+  c("Bytom", "Śląskie"),
+  c("Zgorzelec", "Dolnośląskie"),
+  c("Sochaczew", "Mazowieckie"),
+  c("Dębica", "Podkarpackie"),
+  c("Bielsko-Biała Główna", "Śląskie"),
+  c("Trzebinia", "Małopolskie"),
+  c("Sieradz", "Łódzkie"),
+  c("Łowicz Przedmieście", "Łódzkie"),
+  c("Nowy Bieruń", "Śląskie"),
+  c("Malbork", "Pomorskie"),
+  c("Końskie", "Świętokrzyskie"),
+  c("Radomsko", "Łódzkie"),
+  c("Warszawa Zachodnia peron 9", "Mazowieckie"),
+  c("Kościerzyna", "Pomorskie"),
+  c("Gniezno", "Wielkopolskie"),
+  c("Kędzierzyn-Koźle", "Opolskie"),
+  c("Toruń Główny", "Kujawsko-Pomorskie"),
+  c("Międzylesie", "Dolnośląskie"),
+  c("Piła Główna", "Wielkopolskie"),
+  c("Trzebnica", "Dolnośląskie"),
+  c("Lublin Główny", "Lubelskie"),
+  c("Płock", "Mazowieckie"),
+  c("Chojnice", "Pomorskie"),
+  c("Krynica-Zdrój", "Małopolskie"),
+  c("Lubliniec", "Śląskie"),
+  c("Nowogard", "Zachodniopomorskie"),
+  c("Kłodawa", "Lubuskie"),
+  c("Mińsk Mazowiecki", "Mazowieckie"),
+  c("Łowicz Główny", "Łódzkie"),
+  c("Wołomin Słoneczna", "Mazowieckie"),
+  c("Piwniczna", "Małopolskie"),
+  c("Rawicz", "Wielkopolskie"),
+  c("Jarocin", "Wielkopolskie"),
+  c("Leszno", "Wielkopolskie"),
+  c("Ostrowiec Świętokrzyski", "Świętokrzyskie"),
+  c("Głogów", "Dolnośląskie"),
+  c("Łęczyca", "Łódzkie"),
+  c("Zawiercie", "Śląskie"),
+  c("Jabłonowo Pomorskie", "Kujawsko-Pomorskie"),
+  c("Grodzisk Mazowiecki", "Mazowieckie"),
+  c("Słupsk", "Pomorskie"),
+  c("Chałupki", "Śląskie"),
+  c("Zagórz", "Podkarpackie"),
+  c("Grudziądz", "Kujawsko-Pomorskie"),
+  c("Gorzów Wielkopolski", "Lubuskie"),
+  c("Łódź Kaliska", "Łódzkie"),
+  c("Łazy", "Mazowieckie"),
+  c("Szczecinek", "Zachodniopomorskie"),
+  c("Modlin", "Mazowieckie"),
+  c("Mogilno", "Kujawsko-Pomorskie"),
+  c("Hel", "Pomorskie"),
+  c("Radzymin", "Mazowieckie"),
+  c("Ciechanów", "Mazowieckie"),
+  c("Zbąszynek", "Lubuskie"),
+  c("Krotoszyn", "Wielkopolskie"),
+  c("Białystok", "Podlaskie"),
+  c("Góra Kalwaria", "Mazowieckie"),
+  c("Kielce", "Świętokrzyskie"),
+  c("Drzewica", "Łódzkie"),
+  c("Warszawa Główna", "Mazowieckie"),
+  c("Piotrków Trybunalski", "Łódzkie"),
+  c("Koszalin", "Zachodniopomorskie"),
+  c("Poznań Główny", "Wielkopolskie"),
+  c("Reda", "Pomorskie"),
+  c("Kartuzy", "Pomorskie"),
+  c("Zgierz", "Łódzkie"),
+  c("Kozłów", "Małopolskie"),
+  c("Łódź Widzew", "Łódzkie"),
+  c("Warka", "Mazowieckie"),
+  c("Sobolew", "Mazowieckie"),
+  c("Sierpc", "Mazowieckie"),
+  c("Lubin", "Dolnośląskie"),
+  c("Laskowice Pomorskie", "Pomorskie"),
+  c("Kutno", "Łódzkie"),
+  c("Kamień Pomorski", "Zachodniopomorskie"),
+  c("Bielawa Zachodnia", "Dolnośląskie"),
+  c("Celestynów", "Mazowieckie"),
+  c("Warszawa Lotnisko Chopina", "Mazowieckie"),
+  c("Olkusz", "Małopolskie"),
+  c("Włoszczowa", "Świętokrzyskie"),
+  c("Wągrowiec", "Wielkopolskie"),
+  c("Skoczów", "Śląskie"),
+  c("Kwidzyn", "Pomorskie"),
+  c("Świnoujście Port", "Zachodniopomorskie"),
+  c("Mrozy", "Mazowieckie"),
+  c("Warszawa Gdańska", "Mazowieckie"),
+  c("Tomaszów Mazowiecki", "Łódzkie"),
+  c("Olsztyn Główny", "Warmińsko-Mazurskie"),
+  c("Bohumin Vrbice", "Śląskie"),
+  c("Zgierz Północ", "Łódzkie"),
+  c("Muszyna", "Małopolskie"),
+  c("Wałcz", "Zachodniopomorskie"),
+  c("Gdańsk Wrzeszcz", "Pomorskie"),
+  c("Rzepin", "Lubuskie"),
+  c("Ostrów Wielkopolski", "Wielkopolskie"),
+  c("Strzelin", "Dolnośląskie"),
+  c("Terespol", "Lubelskie"),
+  c("Skawina", "Małopolskie"),
+  c("Kaliska Kujawskie", "Kujawsko-Pomorskie"),
+  c("Kalisz", "Wielkopolskie"),
+  c("Ostrołęka", "Mazowieckie"),
+  c("Pilawa", "Mazowieckie"),
+  c("Legionowo Piaski", "Mazowieckie"),
+  c("Lubań Śląski", "Dolnośląskie"),
+  c("Nasielsk", "Mazowieckie"),
+  c("Sławków", "Śląskie"),
+  c("Loecknitz", "Zachodniopomorskie"),
+  c("Wieliszew", "Mazowieckie"),
+  c("Zielona Góra Główna", "Lubuskie"),
+  c("Grodzisk Wielkopolski", "Wielkopolskie"),
+  c("Piaseczno", "Mazowieckie"),
+  c("Goleniów", "Zachodniopomorskie"),
+  c("Jelcz-Laskowice", "Dolnośląskie"),
+  c("Warszawa Rembertów", "Mazowieckie"),
+  c("Wierzchucin", "Kujawsko-Pomorskie"),
+  c("Suwałki", "Podlaskie"),
+  c("Tuplice", "Lubuskie"),
+  c("Siechnice", "Dolnośląskie"),
+  c("Kępno", "Wielkopolskie"),
+  c("Kąty Wrocławskie", "Dolnośląskie"),
+  c("Milicz", "Dolnośląskie"),
+  c("Pruszcz Gdański", "Pomorskie"),
+  c("Gdynia Stocznia-Uniwersytet Morski", "Pomorskie"),
+  c("Ełk", "Warmińsko-Mazurskie"),
+  c("Frankfurt/Oder", "Lubuskie"),
+  c("Tantow", "Zachodniopomorskie"),
+  c("Oleśnica", "Dolnośląskie"),
+  c("Toruń Wschodni", "Kujawsko-Pomorskie"),
+  c("Czeremcha", "Lubelskie"),
+  c("Koluszki", "Łódzkie"),
+  c("Węgliniec", "Dolnośląskie"),
+  c("Oświęcim", "Małopolskie"),
+  c("Dąbrowa Górnicza Ząbkowice", "Śląskie"),
+  c("Tarnów", "Małopolskie"),
+  c("Czachówek Południowy", "Mazowieckie"),
+  c("Polanica-Zdrój", "Dolnośląskie"),
+  c("Przysucha", "Mazowieckie"),
+  c("Ustka", "Pomorskie"),
+  c("Lichkov", "Czechy"),
+  c("Odolanów", "Wielkopolskie"),
+  c("Iława Główna", "Warmińsko-Mazurskie"),
+  c("Chełmża", "Kujawsko-Pomorskie"),
+  c("Sosnowiec Główny", "Śląskie"),
+  c("Zebrzydowice", "Śląskie"),
+  c("Szklarska Poręba Górna", "Dolnośląskie"),
+  c("Błonie", "Mazowieckie"),
+  c("Miechów", "Małopolskie"),
+  c("Nakło nad Notecią", "Kujawsko-Pomorskie"),
+  c("Rogoźno Wielkopolskie", "Wielkopolskie"),
+  c("Orzesze", "Śląskie"),
+  c("Tarnowskie Góry", "Śląskie"),
+  c("Kudowa-Zdrój", "Dolnośląskie"),
+  c("Kolbuszowa", "Podkarpackie"),
+  c("Kostrzyn", "Lubuskie"),
+  c("Tczew", "Pomorskie"),
+  c("Września", "Wielkopolskie"),
+  c("Legionowo", "Mazowieckie"),
+  c("Chełm", "Lubelskie"),
+  c("Namysłów", "Opolskie"),
+  c("Ziębice", "Dolnośląskie"),
+  c("Kościan", "Wielkopolskie"),
+  c("Busko-Zdrój", "Świętokrzyskie"),
+  c("Pabianice", "Łódzkie"),
+  c("Stargard", "Zachodniopomorskie"),
+  c("Chojna", "Zachodniopomorskie"),
+  c("Starczów", "Dolnośląskie"),
+  c("Luzino", "Pomorskie"),
+  c("Wołów", "Dolnośląskie"),
+  c("Medyka", "Podkarpackie"),
+  c("Kamieniec Ząbkowicki", "Dolnośląskie"),
+  c("Giżycko", "Warmińsko-Mazurskie"),
+  c("Gryfino", "Zachodniopomorskie"),
+  c("Wałbrzych Miasto", "Dolnośląskie"),
+  c("Pszczyna", "Śląskie"),
+  c("Brzeg", "Dolnośląskie"),
+  c("Nysa", "Opolskie"),
+  c("Opoczno", "Łódzkie"),
+  c("Horyniec-Zdrój", "Lubelskie"),
+  c("Pionki", "Mazowieckie"),
+  c("Gołańcz", "Wielkopolskie"),
+  c("Władysławowo", "Pomorskie"),
+  c("Małkinia", "Mazowieckie"),
+  c("Wałbrzych Główny", "Dolnośląskie"),
+  c("Gdańsk Rębiechowo", "Pomorskie"),
+  c("Pierściec", "Śląskie"),
+  c("Kalisz Pomorski", "Zachodniopomorskie"),
+  c("Piechowice", "Dolnośląskie"),
+  c("Łódź Olechów Łoc", "Łódzkie"),
+  c("Piasecznica", "Mazowieckie"),
+  c("Świebodzin", "Lubuskie"),
+  c("Malczyce", "Dolnośląskie"),
+  c("Czempiń", "Wielkopolskie"),
+  c("Łódź Chojny", "Łódzkie"),
+  c("Warszawa Falenica", "Mazowieckie"),
+  c("Forst Lausitz", "Niemcy"),
+  c("Czechowice-Dziedzice", "Śląskie"),
+  c("Grzmiąca", "Zachodniopomorskie"),
+  c("Mezimesti", "Czechy"),
+  c("Jagodin", "Serbia"),
+  c("Bierutów", "Dolnośląskie"),
+  c("Sucha Beskidzka", "Małopolskie"),
+  c("Tychowo", "Zachodniopomorskie"),
+  c("Białogard", "Zachodniopomorskie"),
+  c("Nowy Sącz", "Małopolskie"),
+  c("Wrocław Stadion", "Dolnośląskie"),
+  c("Gdańsk Osowa", "Pomorskie"),
+  c("Dorohusk", "Lubelskie"),
+  c("Opole Wschodnie", "Opolskie"),
+  c("Czersk", "Pomorskie"),
+  c("Gągławki", "Pomorskie"),
+  c("Warszawa Gocławek", "Mazowieckie"),
+  c("Cieszyn", "Śląskie"),
+  c("Bednary", "Wielkopolskie"),
+  c("Bystrzyca Kłodzka Przedmieście", "Dolnośląskie"),
+  c("Raszówka", "Dolnośląskie"),
+  c("Zator", "Małopolskie"),
+  c("Warszawa Wawer", "Mazowieckie"),
+  c("Prostynia", "Warmińsko-Mazurskie"),
+  c("Małdyty", "Warmińsko-Mazurskie"),
+  c("Jeleśnia", "Małopolskie")
+)
+
+wojew = do.call(rbind, lapply(stations, function(x) data.frame(start = x[[1]], region = x[[2]])))
+
+dfwoj = merge(x = df, y = wojew, by = "start")
+
+rm(wojew)
+
+```
+
+Po łączeniu tej listy z naszą wyjściową ramką danych wybierzmy sobie kilka cech które chcemy zwizualizować
+
+```{r}
+leaderinwoj = dfwoj %>%
+  group_by(region, carrier)%>%
+  summarise(avg = mean(delay)) %>%
+  slice(which.max(avg))
+
+bigbywoj = dfwoj %>%
+  group_by(region) %>%
+  summarise(more_by_10 = 100*sum(delay>5)/n())
+```
+
+
+```{r}
+library(rgeoboundaries)
+poland_void <- gb_adm1("Poland")
+
+voiv <- c("Podkarpackie", "Podlaskie", "Łódzkie", "Dolnośląskie", "Opolskie", "Świętokrzyskie",
+          "Mazowieckie", "Wielkopolskie", "Małopolskie", "Lubuskie", "Kujawsko-Pomorskie",
+          "Pomorskie", "Zachodniopomorskie", "Lubelskie", "Warmińsko-Mazurskie", "Śląskie")
+
+poland_void$shapeName = voiv
+
+bigbywoj_map = merge(poland_void, bigbywoj, by.x = "shapeName", by.y = "region")
+
+bigbywoj_map %>%
+  ggplot(aes(fill=more_by_10)) +
+  geom_sf(show.legend = c(alpha=F), color = "white") +
+  scale_fill_gradient(low = "lightgreen", high = "darkgreen") +
+  labs(fill="%") +
+  theme_minimal() +
+  ggtitle("Odsetek opóźnień większych od 10 min")
+
+```
+Widzimy, że najwięcej istotnych opóźnień pojawia się w relacjach które przybywają z województw granicznych naszego kraju. Ma to sens, gdyż pociągi te mogą czekać na często spóźnione pociągi jadące zza granicy z takich krajów, jak Niemcy, Czechy czy Ukraina
+
+```{r}
+leaderinwoj_map = merge(poland_void, leaderinwoj, by.x = "shapeName", by.y = "region")
+
+leaderinwoj_map %>%
+  ggplot(aes(fill=carrier)) +
+  geom_sf(show.legend = c(alpha=F), color = "white") +
+  labs(fill="") +
+  theme_minimal() +
+  ggtitle("Przewoźnik z największą średnią opóźnień")
+```
+Okazało się, że PKP IC jest leaderem w każdym wojewodztwie oprócz Świętokrzyskiego, w tym ostatnim z kolei najbardziej się spóźniały Koleje Mazowieckie. Może to być spowodowane tym, że PKP IC jest największym przewoźnikiem kolejowym w Polsce, jego relacje są dłuższe a więc bardziej są poddane czynnikom sprzyjającym opóźnieniom
+
+## Przewoźnicy
 
 ```{r}
 library(ggridges)
@@ -87,7 +506,7 @@ library(plotly)
 
 delay_summary = df %>%
   group_by(carrier, delay_factor) %>%
-  summarise(count = log(n()), .groups = 'drop')
+  summarise(count = n(), .groups = 'drop')
 
 total_counts = delay_summary %>%
   group_by(carrier) %>%
@@ -100,11 +519,12 @@ delay_summary = delay_summary %>%
 bar_plot = ggplot(delay_summary, aes(x = carrier, y = count, fill = delay_factor)) +
   geom_bar(stat = "identity", position = "dodge") +
   labs(
-    title = "Counts of Train Delays by Carrier",
+    title = "Odsetek opóźnień różnych stopni",
     #x = "Carrier",
-    y = "Log(Percentage of delay type)",
-    fill = "Delay Factor"
+    y = "Procent opóźnień",
+    fill = ""
   ) +
+  xlab("") +
   theme_minimal(base_size = 15) +
   theme(
     plot.title = element_text(hjust = 0.5, face = "bold"),
@@ -121,7 +541,43 @@ interactive_plot = interactive_plot %>%
 
 interactive_plot
 ```
-```{r}
+Widzimy, że każdy przewoźnik ma trend do tego, że tych większych opóźnień ma mniej niż mniejszych, przy czym znacznie więcej relacji wykonał z opóźnieniem <5 min, jednak warto zauważyć, że na przykład PKP IC ma tą różnicę najmniej widoczną
 
+```{r}
+df$day = as.POSIXlt(df$datetime)$mday
+
+avg_by_day_carr = df%>%
+  group_by(day, carrier) %>%
+  summarise(avg = mean(delay))
+
+avg_by_day_carr %>%
+  ggplot(aes(x = factor(day), fill = carrier, y = avg)) +
+  geom_bar(position = 'dodge', stat = "identity") +
+  theme_minimal() +
+  ylab("Średnie opóźnienie") +
+  xlab("Dzień kwietnia 2022")+
+  ggtitle("Rozkład opóźnień u przewoźników każdego dnia")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = "bottom", legend.text = element_text(size = 8, face = "bold"), legend.title = element_blank(), legend.key.height = unit(1, "line"), legend.key.width = unit(0.3, "line"), legend.margin = margin()) 
 ```
+Widzimy, że w każdym dniu (za wyjątkiem 16 i 19) najbardziej się spóźniał PKP IC. Natomiast Koleje Dolnośląskie Mazowieckie i Śląskie w kulku dniach nie za bardzo odstawały od PKP IC. Prawdopodobnie związane to jest z tym, że przewoźnicy ci działają w obrębie olbrzymich miast i metropolii: Warszawy, Wrocławia i Górnośląsko-Zagłębiowskiej Metropolii, mających skomplikowany system kolejowy, wraźliwy na zakłócenia ruchu.
+
+```{r}
+ggplot(df, aes(x = carrier, y = log(delay), fill = carrier))+
+  geom_violin()+
+  xlab("")+
+  ylab("Opóźnienia") +
+  ggtitle("Rozkład opóźnień")+
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"), legend.position = "bottom", legend.text = element_text(size = 8, face = "bold"), legend.title = element_blank(), legend.key.height = unit(1, "line"), legend.key.width = unit(0.3, "line"), legend.margin = margin(), axis.text.x = element_blank()) 
+```
+Ciekawą obserwacją jest to, że niektóre przewoźniki, takie jak SKM w Trójmieście, KŚ lub KM mają znaczną część obserwacji z opóźnieniami bliskimi do zera, czyli w pewnym momencie następuje pewny skok tych wartości, wówczas u innych liczba obserwacji z większymi opóźnieniami zmienia się raczej w sposób ciągły bez nagłych skoków. Można zrobić przypuszczenie, że te pierwsze przewoźniki mają albo bardzo niskie, albo raczej wysokie opóźnienie przez to, że na ich działanie mają wpływ w większości przypadków czynniki występujące rzadko, takie jak np wypadki, awaria sieci trakcyjnej lub taboru, wówczas gdy ta druga grupa raczej zależy od częstych i mniej znaczących czynników takich jak np zakłócenia w ruchu lub oczekiwanie na inny pociąg
+ 
+
+
+
+
+
+
+
+
+
 
