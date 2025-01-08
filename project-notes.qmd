@@ -166,7 +166,7 @@ ggplot(df) +
   geom_boxplot(aes(is_rain, log(delay), fill = is_rain)) +
   theme_minimal() +
   xlab("Opady")+
-  ylab("Opóźnienie [log (min)]")+
+  ylab("Opóźnienie (min | log scale)")+
   theme(
     axis.title = element_text(face = "bold"),
     legend.position = "none"
