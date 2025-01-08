@@ -1,0 +1,115 @@
+---
+title: "Dodatek do projektu: przygotowanie zbiorów"
+author: "Andrii Yanishesvkyi"
+highlight-style: github
+format: 
+  html:
+    embed-resources: true
+    toc: true
+    code-fold: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message=FALSE, error = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(fuzzyjoin)
+```
+
+# Zbiór opóźnień
+
+Wczytujemy zbiór i sprawdzamy braki danych
+
+```{r}
+df = read.csv('delays.csv')
+sum(is.na(df))
+
+head(df)
+```
+
+Zmienna `datetime` zawiera zarówno czas jak i datę, więc zmienne `arrival` i `date` nie są potrzebne do naszej analizy
+
+```{r}
+df = df[,!(colnames(df) == "arrival" | colnames(df) == "date")]
+df$datetime = as.POSIXct(df$datetime, format = "%Y-%m-%d %H:%M")
+```
+
+Usuwamy napisy `min` z kolumny `delay`
+
+```{r}
+df$delay = as.numeric(gsub(" min", "", df$delay))
+```
+
+Musimy wybrać próbę z maszego zbioru danych, na której będziemy przeprowadzali analizę. Ponieważ zbiór ten liczy prawie 4 mln obserwacji, optymalnie będzie wybrać 5% obserwacji reprezentujących nasze dane
+
+```{r}
+df = df %>%
+  group_by(datetime) %>%
+  arrange(delay)%>% 
+  slice(seq(1, n(), by = 20)) 
+```
+
+Zmienna `connection` zawiera zarówno stację początkową, jak i końcową, natomiast dla nas będzie wygodniej analizować te połączenia z oddzielnymi kolumnami na początek i koniec relacji 
+
+```{r}
+split_data = do.call(rbind, strsplit(df$connection, " - "))
+df$start = split_data[,1]
+df$end = split_data[,2]
+rm(split_data)
+df = df[, colnames(df)!="connection"]
+```
+
+# Zbiór pogodowy
+
+Wczytujemy i widzimy, że pierwszy wiersz reprezentuje metadatę tego zbióru, wówczas drugi to tak naprawdę są nazwy istotnych dla nas zmiennych:
+
+```{r}
+weather = read.csv("weather.csv")
+head(weather)
+```
+
+Zapisujemy drugi wiersz w nazwy kolumn i usuwamy drugi i pierwszy wiersz
+
+```{r}
+colnames(weather) = c("time", "temperature", "humidity", "rain", "pressure", "wind_speed")
+weather = weather[c(-1, -2), ]
+weather$time = strptime(weather$time, format = '%Y-%m-%d T %H:%M')
+```
+
+# Lączenie zbiorów
+
+Do tego celu użyjmy funkcji `difference_left_join` z biblioteki `fuzzyjoin`
+
+Ponieważ zbiór [2](#pogoda) ma dane rejestrowane co godzinę, podczas gdy zbiór [1](#opozn) ma zapisy z różnicą w 5 minut, musimy łączyć te zbiory z relacją $1\colon n$, tzn. jedna obserwacja zbioru [2](#pogoda) dopisze się do wielu wierszy zbioru [1](#opozn)
+
+Idea polega na dopisywaniu wiersza zbioru [2](#pogoda) do wiersza zbioru [1](#opozn) wtw gdy różnica zmiennych `datetime` jest mniejsza od $30$ min, ogólnie mówiąc bierzemy dane z najbliższego okresu.
+
+```{r}
+df = fuzzyjoin::difference_left_join(
+  df, weather, 
+  by = c("datetime" = "time"),
+  max_dist = as.difftime(30, units = "mins") 
+)%>% 
+  select(-time)
+
+rm(weather)
+```
+
+Jeszcze na koniec konwertujemy `datetime` w wygodny dla nas typ - numeryczny i zapisujemy zbiór
+```{r}
+df$datetime = as.numeric(df$datetime)
+
+write.csv(df, file = "data.csv")
+```
+
+
+
+
+
+
+
+
+
+
