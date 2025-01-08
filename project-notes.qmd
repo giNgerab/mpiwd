@@ -1,5 +1,5 @@
 ---
-title: "Badanie opóźnień w ruchu pociągów w okresie 16.05.2022 - 30.05.2022"
+title: "Badanie opóźnień w ruchu pociągów"
 author: "Andrii Yanishesvkyi"
 highlight-style: github
 format: 
@@ -15,15 +15,27 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message=FALSE, error = FALSE
 
 # Wstęp
 
+## Koleje w Polsce
+
+Pierwsze linie kolejowe w obrębie współczesnych granic zostały otwarte w 1842 roku. Według stanu na dzień 31 grudnia 2018 długość czynnych linii kolejowych wynosiła 19 200 km, w tym 11 900 km zelektryfikowanych. Kolej przetransportowała w tym samym roku 249 milionów ton ładunków i 310 milionów pasażerów w ruchu normalnotorowym.
+
+Największymi przewoźnikami osobowymi w Polsce są PKP Intercity oraz Polregio. Funkcjonują także przewoźniki regionalne takie jak Koleje Małopolskie, Mazwoieckie, Śląskie i tym podone
+
+![IC Lubomirski: Przemyśl - Gdynia, najdłuższa relacja w Polsce](lubomirski.jpg)
+
+## Zarys projektu
+
+W tym projekcie po czyszczeniu zbioru danych oraz konwertowaniu poszczególnych zmiennych do właściwego dla nas typu zajmiemy się badaniem zależności pomiędzy pewnymi typami zmiennych za pomocą np. wyznaczenia korelacji pomiędzy zmiennymi numerycznymi. Znajdziemy też średnie opóźnień dla poszczególnych przewoźników lub relacji, uwzględnimy dane pogodowe, żeby wyłapać tę zależność oraz wesprzymy nasze wnioski odpowiednimi wizualicjami. Pomysłem też jest zrobienie liniowego modelu predykcyjnego, który na podstawie danych pogodowych będzie przewidywał średnie opóźnienie na poszczególnych stacji
+
 ## Cele
 
-Zbadać częstotliwość oraz skalę opóźnień pociągów w danym okresie oraz zależność ich od sytuacji meteorologicznej. Przedstawić tę zależność za pomocą wizualizacji.
+Celem projektu jest zbadać częstotliwość oraz skalę opóźnień pociągów w danym okresie oraz zależność ich od sytuacji meteorologicznej. Przedstawić tę zależność za pomocą wizualizacji. Zwizualizować też inne zależności w danych
 
 ## Hipotezy
 
 Przed badaniem robimy przypuszczenie, iż gorsza sytuacja pogodowa powoduje większe i częstsze opóźnienia
 
-## Zbiór danych
+## Zbiory danych
 
 1.  [Opóźnienia pociągów](https://www.kaggle.com/datasets/bartek358/train-delays) <a name="opozn"></a>
 
@@ -53,6 +65,12 @@ Dataset został opublikowany w roku 2022 i do teraz ma nie więcej niż 800 pobr
 
 Z drugiej strony, zbiór liczy około 4 mln obserwacji, więc jest dla nas dość reprezentatywne.
 
+2.  [Pogoda](https://open-meteo.com/en/docs/historical-weather-api#start_date=2022-05-16&end_date=2022-05-30&hourly=temperature_2m,rain,wind_speed_10m&daily=&wind_speed_unit=ms&timezone=Europe%2FBerlin) <a name="pogoda"></a>
+
+[Plik](/weather.csv)
+
+**Opis**: Są to archiwowe dane pogodowe dla okresu, odpowiadającego okresu zbierania danych w pierwszym zbiorze. Za lokalizaję wzięto przybliżone koordynaty geograficznego centrum Polski.
+
 ```{r}
 rm(list = ls())
 library(tidyverse)
@@ -65,17 +83,6 @@ df = read.csv("data.csv")
 
 datatable(head(df, n = 40))
 ```
-
-
-2.  [Pogoda](https://open-meteo.com/en/docs/historical-weather-api#start_date=2022-05-16&end_date=2022-05-30&hourly=temperature_2m,rain,wind_speed_10m&daily=&wind_speed_unit=ms&timezone=Europe%2FBerlin) <a name="pogoda"></a>
-
-[Plik](/weather.csv)
-
-**Opis**: Są to archiwowe dane pogodowe dla okresu, odpowiadającego okresu zbierania danych w pierwszym zbiorze. Za lokalizaję wzięto przybliżone koordynaty geograficznego centrum Polski.
-
-## Zarys projektu
-
-W tym projekcie po czyszczeniu zbioru danych oraz konwertowaniu poszczególnych zmiennych do właściwego dla nas typu zajmiemy się badaniem zależności pomiędzy pewnymi typami zmiennych za pomocą np. wyznaczenia korelacji pomiędzy zmiennymi numerycznymi. Znajdziemy też średnie opóźnień dla poszczególnych przewoźników lub relacji, uwzględnimy dane pogodowe, żeby wyłapać tę zależność oraz wesprzymy nasze wnioski odpowiednimi wizualicjami. Pomysłem też jest zrobienie liniowego modelu predykcyjnego, który na podstawie danych pogodowych będzie przewidywał średnie opóźnienie na poszczególnych stacji.
 
 
 # Przygotowanie zbiorów danych
@@ -110,7 +117,7 @@ ggcorrplot(corr,
 ```
 Na zaskoczenie korelacja pomiędzy zmienną `delay` a zmiennymi pogodowymi okazała się bardzo bliska zeru, z czego robimy wniosek, że w ten sposób nie ujawnimy zależności o ile one istnieją
 
-## Model regresji logistycznej (V RAZRABOTKIE)
+## Model regresji logistycznej
 
 Model ten jest przydatny do przeprowadzenia przewidywania zmiennej typu logicznego na podstawie wartości predyktorów. Naszą zmienną którą będziemy chcieli przewidywać będzie `is_late`. Model będziemy uczyć na zbiorze testowym na podstawie predyktorów `rain`, `wind_speed` oraz `temperature`. Jako wynik model będzie zwracał prawdopodobieństwo tego, że w danym przypadku wystąpi opóźnienie (`delay` > 5), czyli że `is_late = TRUE`
 
@@ -133,24 +140,24 @@ predicted_bool = ifelse(predicted>0.1, TRUE, FALSE)
 
 confusionMatrix(factor(test$is_late, levels = c(TRUE, FALSE)), factor(predicted_bool, levels = c(TRUE, FALSE)))
 ```
+Widzimy, że model nie ma mocy przewidywania, ponieważ p-value jest równe 1 oraz na przykładzie danych testowych możemy się upewnić, że model nie jest skuteczny w przewidywaniu naszej zmiennej. Stało się tak dlatego, że w naszych danych nie występuje wystarczającej dla nas zależności zmiennej którą przewidujemy od predyktorów a więc nie możemy sądzić o tej zmiennej na podstawie innych
 
 
 # Wizualizacje
 
 ## Dane meteorologiczne
 
-Wzizualizujmy sobie najpierw jakie opóźnienia były przy różnych ilościach opadów
+Aby zilustrować jaką sytuację mamy co do zależności opóźnienia, zwizualizujmy jakie opóźnienia były przy różnych ilościach opadów
 
 ```{r}
 ggplot(df)+
   geom_point(aes(y = delay, x = rain), colour = "darkorange")+
-  geom_line()
   xlab("Opady (mm)")+
   ylab("Opóźnienie (min)")+
   theme_minimal() 
 ```
 
-Nie jest to dziwne więc że korelacja była taka mała a model regresji okazał się nie efektywny. Widzimy z wykresu, że w naszych danych nie ma odpowiedniości: duże jak i małe opóźnienia można spotkać przy przeróżnych opadach.
+Nie jest to dziwne więc że korelacja była taka mała a model regresji okazał się nie efektywny. Widzimy z wykresu, że w naszych danych nie ma odpowiedniości: duże jak i małe opóźnienia można spotkać przy dużych, jak i przy małych opadach.
 
 ```{r}
 df$is_rain = ifelse(df$rain>0, TRUE, FALSE)
@@ -560,7 +567,7 @@ rm(wojew)
 
 ```
 
-Po łączeniu tej listy z naszą wyjściową ramką danych wybierzmy sobie kilka cech które chcemy zwizualizować
+Po łączeniu tej listy z naszą wyjściową ramką danych wybieramy sobie kilka cech które chcemy zwizualizować
 
 ```{r}
 leaderinwoj = dfwoj %>%
