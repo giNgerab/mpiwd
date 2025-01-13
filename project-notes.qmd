@@ -2,6 +2,7 @@
 title: "Badanie opóźnień w ruchu pociągów"
 author: "Andrii Yanishesvkyi"
 highlight-style: github
+lang: pl
 format: 
   html:
     embed-resources: true
@@ -14,14 +15,6 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message=FALSE, error = FALSE
 ```
 
 # Wstęp
-
-## Koleje w Polsce
-
-Pierwsze linie kolejowe w obrębie współczesnych granic zostały otwarte w 1842 roku. Według stanu na dzień 31 grudnia 2018 długość czynnych linii kolejowych wynosiła 19 200 km, w tym 11 900 km zelektryfikowanych. Kolej przetransportowała w tym samym roku 249 milionów ton ładunków i 310 milionów pasażerów w ruchu normalnotorowym.
-
-Największymi przewoźnikami osobowymi w Polsce są PKP Intercity oraz Polregio. Funkcjonują także przewoźniki regionalne takie jak Koleje Małopolskie, Mazwoieckie, Śląskie i tym podone
-
-![IC Lubomirski: Przemyśl - Gdynia, najdłuższa relacja w Polsce](lubomirski.jpg)
 
 ## Zarys projektu
 
