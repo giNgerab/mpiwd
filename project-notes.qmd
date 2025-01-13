@@ -64,6 +64,11 @@ Z drugiej strony, zbiór liczy około 4 mln obserwacji, więc jest dla nas doś�
 
 **Opis**: Są to archiwowe dane pogodowe dla okresu, odpowiadającego okresu zbierania danych w pierwszym zbiorze. Za lokalizaję wzięto przybliżone koordynaty geograficznego centrum Polski.
 
+
+# Przygotowanie zbiorów danych
+
+Z powodu tego, że zbiór [1](#opozn) liczy prawie 4 mln obserwacji, wybranie prób reprezentatywnych oraz łączenie w jedyny zbiór znalazły się w [oddzielnym pliku](./delay_modification.html). Oto prykładowo są pierwsze 5 wierszy złączonego datasetu:
+
 ```{r}
 rm(list = ls())
 library(tidyverse)
@@ -71,25 +76,17 @@ library(chron)
 library(corrplot)
 library(fuzzyjoin)
 library(DT)
+library(kableExtra)
 df = read.csv("data.csv")
-# datatable(df)
 
-datatable(head(df, n = 40))
-```
-
-
-# Przygotowanie zbiorów danych
-
-Z powodu tego, że zbiór [1](#opozn) liczy prawie 4 mln obserwacji, wybranie prób reprezentatywnych oraz łączenie w jedyny zbiór znalazły się w [oddzielnym pliku](./delay_modification.html)
-
-
-```{r}
 df = df[, !colnames(df)=="X"]
 df[sapply(df, is.character)] = lapply(df[sapply(df, is.character)], as.factor)
-```
-```{r}
 
+kable(head(df))
 ```
+
+
+
 
 # Analiza zależności
 
@@ -264,7 +261,7 @@ ggplotly(plot_naj, tooltip = c("label", "fill"))
 
 ## Mapa Polski
 
-Pokażmy jak opóźnienia zależały od tego, skąd przybył pociąg. Do tego celu wziąłem sobie wszystkie unikalne wartości z kolumny `start` i za pomocą narzędzia [ChatGPT](https://chatgpt.com) otzymałem listę województw w których znajdują się te stacje
+Pokażmy jak opóźnienia zależały od tego, skąd przybył pociąg. Do tego celu wziąłem sobie wszystkie unikalne wartości z kolumny `start` i za pomocą narzędzia [ChatGPT](https://chatgpt.com) otzymałem listę województw w których znajdują się te stacje. Po złączeniu tej listy z naszą wyjściową ramką danych wybieramy sobie kilka cech które chcemy zwizualizować
 
 ```{r}
 stations = list(
@@ -558,11 +555,6 @@ dfwoj = merge(x = df, y = wojew, by = "start")
 
 rm(wojew)
 
-```
-
-Po łączeniu tej listy z naszą wyjściową ramką danych wybieramy sobie kilka cech które chcemy zwizualizować
-
-```{r}
 leaderinwoj = dfwoj %>%
   group_by(region, carrier)%>%
   summarise(avg = mean(delay)) %>%
@@ -575,11 +567,7 @@ bigbywoj = dfwoj %>%
 lublin_dir = dfwoj[df$end == "Lublin Główny",] %>%
   group_by(region)%>%
   summarise(delaysum = sum(delay))
-  
-```
 
-
-```{r}
 library(rgeoboundaries)
 poland_void = gb_adm1("Poland")
 
@@ -599,8 +587,8 @@ bigbywoj_map %>%
   theme_minimal() +
   theme(plot.title = element_text(hjust = 0.5, face = "bold"))+
   ggtitle("Odsetek opóźnień większych od 10 min")
-
 ```
+
 Widzimy, że najwięcej istotnych opóźnień pojawia się w relacjach które przybywają z województw granicznych naszego kraju. Ma to sens, gdyż pociągi te mogą czekać na często spóźnione pociągi jadące zza granicy z takich krajów, jak Niemcy, Czechy czy Ukraina
 
 ```{r}
@@ -628,9 +616,6 @@ lublin_dir_map %>%
   scale_fill_gradient(low = "lightblue", high = "darkblue") +
   ggtitle("Skąd najwięcej spóźnień do Lublina")
 ```
-
-
-
  
 # Wnioski
 
